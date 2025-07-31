@@ -10,6 +10,9 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
+// Name is the name of this host module.
+const Name = "pantopic/wazero-shard-client"
+
 var (
 	DefaultCtxKeyMeta  = `wazero_shard_client_meta_key`
 	DefaultCtxKeyAgent = `wazero_shard_client_meta_agent`
@@ -43,13 +46,13 @@ func New(opts ...Option) *hostModule {
 	return p
 }
 
-func (p *hostModule) Uri() string {
-	return "github.com/pantopic/wazero-shard-client"
+func (p *hostModule) Name() string {
+	return Name
 }
 
 // Register instantiates the host module, making it available to all module instances in this runtime
 func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error) {
-	builder := r.NewHostModuleBuilder("shard_client")
+	builder := r.NewHostModuleBuilder(Name)
 	register := func(name string, fn func(ctx context.Context, m api.Module, stack []uint64)) {
 		builder = builder.NewFunctionBuilder().WithGoModuleFunction(api.GoModuleFunc(fn), nil, nil).Export(name)
 	}
@@ -69,10 +72,11 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, p.ctxKeyMeta)
 				client := p.agent(ctx).Client(shardID(m, meta))
-				val, data, err := fn(ctx, client, data(m, meta))
-				setVal(val)
-				setData(data)
-				writeError(m, meta, err)
+				fn(ctx, client, data(m, meta))
+				// val, data, err := fn(ctx, client, data(m, meta))
+				// setVal(val)
+				// setData(data)
+				// writeError(m, meta, err)
 			})
 		default:
 			log.Panicf("Method signature implementation missing: %#v", fn)
@@ -83,10 +87,10 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 }
 
 // InitContext retrieves the meta page from the wasm module
-func (p *hostModule) InitContext(ctx context.Context, m api.Module) (context.Context, *meta, error) {
+func (p *hostModule) InitContext(ctx context.Context, m api.Module) (context.Context, error) {
 	stack, err := m.ExportedFunction(`__shard_client`).Call(ctx)
 	if err != nil {
-		return ctx, nil, err
+		return ctx, err
 	}
 	meta := &meta{}
 	ptr := uint32(stack[0])
@@ -100,7 +104,14 @@ func (p *hostModule) InitContext(ctx context.Context, m api.Module) (context.Con
 	} {
 		*v = readUint32(m, ptr+uint32(4*(i+2)))
 	}
-	return context.WithValue(ctx, p.ctxKeyMeta, meta), meta, nil
+	return context.WithValue(ctx, p.ctxKeyMeta, meta), nil
+}
+
+// ContextCopy populates dst context with the meta page from src context.
+func (h *hostModule) ContextCopy(src, dst context.Context) context.Context {
+	dst = context.WithValue(dst, h.ctxKeyMeta, get[*meta](src, h.ctxKeyMeta))
+	dst = context.WithValue(dst, h.ctxKeyAgent, h.agent(src))
+	return dst
 }
 
 func (p *hostModule) agent(ctx context.Context) *zongzi.Agent {

@@ -1,1 +1,1 @@
-package shard_client
+package shardclient
