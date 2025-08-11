@@ -102,7 +102,7 @@ func (p *hostModule) InitContext(ctx context.Context, m api.Module) (context.Con
 		&meta.ptrData,
 		&meta.ptrErrCode,
 	} {
-		*v = readUint32(m, ptr+uint32(4*(i+2)))
+		*v = readUint32(m, ptr+uint32(4*i))
 	}
 	return context.WithValue(ctx, p.ctxKeyMeta, meta), nil
 }
