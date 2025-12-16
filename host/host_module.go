@@ -2,6 +2,7 @@ package wazero_shard_client
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 
@@ -14,17 +15,21 @@ import (
 const Name = "pantopic/wazero-shard-client"
 
 var (
-	DefaultCtxKeyMeta  = `wazero_shard_client_meta_key`
-	DefaultCtxKeyAgent = `wazero_shard_client_meta_agent`
+	DefaultCtxKeyMeta  = `wazero_shard_client_meta`
+	DefaultCtxKeyAgent = `wazero_shard_client_agent`
 )
 
 type meta struct {
-	ptrShardID uint32
-	ptrVal     uint32
-	ptrDataMax uint32
-	ptrDataLen uint32
-	ptrData    uint32
-	ptrErrCode uint32
+	ptrData         uint32
+	ptrDataCap      uint32
+	ptrDataLen      uint32
+	ptrErr          uint32
+	ptrErrCap       uint32
+	ptrErrLen       uint32
+	ptrShardName    uint32
+	ptrShardNameCap uint32
+	ptrShardNameLen uint32
+	ptrVal          uint32
 }
 
 type hostModule struct {
@@ -33,12 +38,21 @@ type hostModule struct {
 	module      api.Module
 	ctxKeyMeta  string
 	ctxKeyAgent string
+
+	resolveNamespace func(context.Context) string
+	resolveResource  func(context.Context) string
 }
 
 func New(opts ...Option) *hostModule {
 	p := &hostModule{
 		ctxKeyMeta:  DefaultCtxKeyMeta,
 		ctxKeyAgent: DefaultCtxKeyAgent,
+		resolveNamespace: func(ctx context.Context) string {
+			return `default`
+		},
+		resolveResource: func(ctx context.Context) string {
+			return `default`
+		},
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -58,25 +72,33 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 	}
 	for name, fn := range map[string]any{
 		"Read": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
-			return client.Read(ctx, query, true)
-		},
-		"ReadLocal": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
+			// TODO [Auth] - Validate that invocation is authorized to read shard
 			return client.Read(ctx, query, false)
 		},
+		"ReadLocal": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
+			// TODO [Auth] - Validate that invocation is authorized to read shard
+			return client.Read(ctx, query, true)
+		},
 		"Apply": func(ctx context.Context, client zongzi.ShardClient, cmd []byte) (val uint64, res []byte, err error) {
+			// TODO [Auth] - Validate that invocation is authorized to write to shard
 			return client.Apply(ctx, cmd)
+			// val, res, err = client.Apply(ctx, cmd)
+			// slog.Info(`Apply`, `client`, client, `cmd`, string(cmd), `val`, val, `res`, res, `err`, err)
+			// return
 		},
 	} {
 		switch fn := fn.(type) {
 		case func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, p.ctxKeyMeta)
-				client := p.agent(ctx).Client(shardID(m, meta))
-				fn(ctx, client, data(m, meta))
-				// val, data, err := fn(ctx, client, data(m, meta))
-				// setVal(val)
-				// setData(data)
-				// writeError(m, meta, err)
+				client := p.agent(ctx).ClientByName(fmt.Sprintf(`%s.%s.%s`,
+					p.resolveNamespace(ctx),
+					p.resolveResource(ctx),
+					getShardName(m, meta)))
+				val, data, err := fn(ctx, client, getData(m, meta))
+				setVal(m, meta, val)
+				setData(m, meta, data)
+				setErr(m, meta, err)
 			})
 		default:
 			log.Panicf("Method signature implementation missing: %#v", fn)
@@ -87,7 +109,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 }
 
 // InitContext retrieves the meta page from the wasm module
-func (p *hostModule) InitContext(ctx context.Context, m api.Module) (context.Context, error) {
+func (p *hostModule) InitContext(ctx context.Context, m api.Module, agent *zongzi.Agent) (context.Context, error) {
 	stack, err := m.ExportedFunction(`__shard_client`).Call(ctx)
 	if err != nil {
 		return ctx, err
@@ -95,16 +117,22 @@ func (p *hostModule) InitContext(ctx context.Context, m api.Module) (context.Con
 	meta := &meta{}
 	ptr := uint32(stack[0])
 	for i, v := range []*uint32{
-		&meta.ptrShardID,
 		&meta.ptrVal,
-		&meta.ptrDataMax,
+		&meta.ptrShardNameCap,
+		&meta.ptrShardNameLen,
+		&meta.ptrShardName,
+		&meta.ptrDataCap,
 		&meta.ptrDataLen,
 		&meta.ptrData,
-		&meta.ptrErrCode,
+		&meta.ptrErrCap,
+		&meta.ptrErrLen,
+		&meta.ptrErr,
 	} {
 		*v = readUint32(m, ptr+uint32(4*i))
 	}
-	return context.WithValue(ctx, p.ctxKeyMeta, meta), nil
+	ctx = context.WithValue(ctx, p.ctxKeyMeta, meta)
+	ctx = context.WithValue(ctx, p.ctxKeyAgent, agent)
+	return ctx, nil
 }
 
 // ContextCopy populates dst context with the meta page from src context.
@@ -126,8 +154,12 @@ func get[T any](ctx context.Context, key string) T {
 	return v.(T)
 }
 
-func shardID(m api.Module, meta *meta) uint64 {
-	return readUint64(m, meta.ptrShardID)
+func getShardName(m api.Module, meta *meta) []byte {
+	return read(m, meta.ptrShardName, meta.ptrShardNameLen, meta.ptrShardNameCap)
+}
+
+func setShardID(m api.Module, meta *meta, val uint64) {
+	writeUint64(m, meta.ptrVal, val)
 }
 
 func readUint32(m api.Module, ptr uint32) (val uint32) {
@@ -138,8 +170,34 @@ func readUint32(m api.Module, ptr uint32) (val uint32) {
 	return
 }
 
-func data(m api.Module, meta *meta) []byte {
-	return read(m, meta.ptrVal, meta.ptrDataLen, meta.ptrDataMax)
+func getData(m api.Module, meta *meta) []byte {
+	return read(m, meta.ptrData, meta.ptrDataLen, meta.ptrDataCap)
+}
+
+func dataBuf(m api.Module, meta *meta) []byte {
+	return read(m, meta.ptrData, 0, meta.ptrDataCap)
+}
+
+func setVal(m api.Module, meta *meta, val uint64) {
+	writeUint64(m, meta.ptrVal, val)
+}
+
+func setData(m api.Module, meta *meta, b []byte) {
+	copy(dataBuf(m, meta)[:len(b)], b)
+	writeUint32(m, meta.ptrDataLen, uint32(len(b)))
+}
+
+func errBuf(m api.Module, meta *meta) []byte {
+	return read(m, meta.ptrErr, 0, meta.ptrErrCap)
+}
+
+func setErr(m api.Module, meta *meta, err error) {
+	var msg string
+	if err != nil {
+		msg = err.Error()
+		copy(errBuf(m, meta)[:len(msg)], msg)
+	}
+	writeUint32(m, meta.ptrErrLen, uint32(len(msg)))
 }
 
 func read(m api.Module, ptrData, ptrLen, ptrMax uint32) (buf []byte) {
@@ -160,6 +218,12 @@ func readUint64(m api.Module, ptr uint32) (val uint64) {
 
 func writeUint32(m api.Module, ptr uint32, val uint32) {
 	if ok := m.Memory().WriteUint32Le(ptr, val); !ok {
+		log.Panicf("Memory.Read(%d) out of range", ptr)
+	}
+}
+
+func writeUint64(m api.Module, ptr uint32, val uint64) {
+	if ok := m.Memory().WriteUint64Le(ptr, val); !ok {
 		log.Panicf("Memory.Read(%d) out of range", ptr)
 	}
 }
