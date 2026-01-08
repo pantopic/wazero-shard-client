@@ -4,40 +4,50 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/logbn/zongzi"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+
+	"github.com/pantopic/wazero-pool"
 )
 
 // Name is the name of this host module.
 const Name = "pantopic/wazero-shard-client"
 
 var (
-	DefaultCtxKeyMeta  = `wazero_shard_client_meta`
-	DefaultCtxKeyAgent = `wazero_shard_client_agent`
+	DefaultCtxKeyMeta       = `wazero_shard_client_meta`
+	DefaultCtxKeyAgent      = `wazero_shard_client_agent`
+	DefaultCtxKeyModPool    = `wazero_shard_client_mod_pool`
+	DefaultCtxKeyStreamList = `wazero_shard_client_stream_list`
 )
 
 type meta struct {
-	ptrData         uint32
-	ptrDataCap      uint32
-	ptrDataLen      uint32
-	ptrErr          uint32
-	ptrErrCap       uint32
-	ptrErrLen       uint32
-	ptrShardName    uint32
-	ptrShardNameCap uint32
-	ptrShardNameLen uint32
-	ptrVal          uint32
+	ptrData          uint32
+	ptrDataCap       uint32
+	ptrDataLen       uint32
+	ptrErr           uint32
+	ptrErrCap        uint32
+	ptrErrLen        uint32
+	ptrShardName     uint32
+	ptrShardNameCap  uint32
+	ptrShardNameLen  uint32
+	ptrStreamName    uint32
+	ptrStreamNameCap uint32
+	ptrStreamNameLen uint32
+	ptrVal           uint32
 }
 
 type hostModule struct {
 	sync.RWMutex
 
-	module      api.Module
-	ctxKeyMeta  string
-	ctxKeyAgent string
+	module           api.Module
+	ctxKeyMeta       string
+	ctxKeyAgent      string
+	ctxKeyModPool    string
+	ctxKeyStreamList string
 
 	resolveNamespace func(context.Context) string
 	resolveResource  func(context.Context) string
@@ -45,8 +55,10 @@ type hostModule struct {
 
 func New(opts ...Option) *hostModule {
 	p := &hostModule{
-		ctxKeyMeta:  DefaultCtxKeyMeta,
-		ctxKeyAgent: DefaultCtxKeyAgent,
+		ctxKeyMeta:       DefaultCtxKeyMeta,
+		ctxKeyAgent:      DefaultCtxKeyAgent,
+		ctxKeyModPool:    DefaultCtxKeyModPool,
+		ctxKeyStreamList: DefaultCtxKeyStreamList,
 		resolveNamespace: func(ctx context.Context) string {
 			return `default`
 		},
@@ -71,24 +83,91 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		builder = builder.NewFunctionBuilder().WithGoModuleFunction(api.GoModuleFunc(fn), nil, nil).Export(name)
 	}
 	for name, fn := range map[string]any{
-		"Read": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
-			// TODO [Auth] - Validate that invocation is authorized to read shard
+		"__shard_client_apply": func(ctx context.Context, client zongzi.ShardClient, cmd []byte) (val uint64, res []byte, err error) {
+			return client.Apply(ctx, cmd)
+		},
+		"__shard_client_read": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
 			return client.Read(ctx, query, false)
 		},
-		"ReadLocal": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
-			// TODO [Auth] - Validate that invocation is authorized to read shard
+		"__shard_client_read_local": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
 			return client.Read(ctx, query, true)
 		},
-		"Apply": func(ctx context.Context, client zongzi.ShardClient, cmd []byte) (val uint64, res []byte, err error) {
-			// TODO [Auth] - Validate that invocation is authorized to write to shard
-			return client.Apply(ctx, cmd)
-			// val, res, err = client.Apply(ctx, cmd)
-			// slog.Info(`Apply`, `client`, client, `cmd`, string(cmd), `val`, val, `res`, res, `err`, err)
-			// return
+		"__shard_client_stream_open": func(ctx context.Context, client zongzi.ShardClient, name []byte) (err error) {
+			s, err := p.getStreamList(ctx).new(ctx, name)
+			if err != nil {
+				return
+			}
+			s.wg.Go(func() {
+				if err := client.Stream(ctx, s.in, s.out, false); err != nil {
+					slog.Error("Error opening stream", "name", s.name, "err", err)
+				}
+				s.close()
+			})
+			s.wg.Go(func() {
+				for {
+					select {
+					case res := <-s.out:
+						meta := get[*meta](ctx, p.ctxKeyMeta)
+						wazeropool.Context(ctx).Run(func(mod api.Module) {
+							setStreamName(mod, meta, name)
+							setVal(mod, meta, res.Value)
+							setData(mod, meta, res.Data)
+							setErr(mod, meta, nil)
+							if _, err = mod.ExportedFunction("__shard_client_stream_recv").Call(ctx); err != nil {
+								return
+							}
+							if err := getErr(mod, meta); err != nil {
+								slog.Error("Error receiving stream message", "name", s.name, "err", err)
+								s.close()
+							}
+						})
+					case <-s.ctx.Done():
+						return
+					}
+				}
+			})
+			return
+		},
+		"__shard_client_stream_open_local": func(ctx context.Context, client zongzi.ShardClient, name []byte) (err error) {
+			s, err := p.getStreamList(ctx).new(ctx, name)
+			if err != nil {
+				return
+			}
+			s.wg.Go(func() {
+				if err := client.Stream(ctx, s.in, s.out, true); err != nil {
+					slog.Error("Error opening stream local", "name", s.name, "err", err)
+				}
+				s.close()
+			})
+			return
+		},
+		"__shard_client_stream_send": func(ctx context.Context, name, msg []byte) (err error) {
+			s, err := p.getStreamList(ctx).find(name)
+			if err != nil {
+				return
+			}
+			select {
+			case s.in <- msg:
+			case <-ctx.Done():
+				err = ErrStreamClosed
+			}
+			return
+		},
+		"__shard_client_stream_close": func(ctx context.Context, name []byte) (err error) {
+			s, err := p.getStreamList(ctx).find(name)
+			if err != nil {
+				return
+			}
+			if s == nil {
+				err = ErrStreamNotFound
+				return
+			}
+			s.close()
+			return
 		},
 	} {
 		switch fn := fn.(type) {
-		case func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error):
+		case func(context.Context, zongzi.ShardClient, []byte) (uint64, []byte, error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, p.ctxKeyMeta)
 				client := p.agent(ctx).ClientByName(fmt.Sprintf(`%s.%s.%s`,
@@ -98,6 +177,28 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 				val, data, err := fn(ctx, client, getData(m, meta))
 				setVal(m, meta, val)
 				setData(m, meta, data)
+				setErr(m, meta, err)
+			})
+		case func(ctx context.Context, client zongzi.ShardClient, name []byte) (err error):
+			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
+				meta := get[*meta](ctx, p.ctxKeyMeta)
+				client := p.agent(ctx).ClientByName(fmt.Sprintf(`%s.%s.%s`,
+					p.resolveNamespace(ctx),
+					p.resolveResource(ctx),
+					getShardName(m, meta)))
+				err := fn(ctx, client, getStreamName(m, meta))
+				setErr(m, meta, err)
+			})
+		case func(ctx context.Context, name, msg []byte) (err error):
+			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
+				meta := get[*meta](ctx, p.ctxKeyMeta)
+				err := fn(ctx, getStreamName(m, meta), getData(m, meta))
+				setErr(m, meta, err)
+			})
+		case func(ctx context.Context, name []byte) (err error):
+			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
+				meta := get[*meta](ctx, p.ctxKeyMeta)
+				err := fn(ctx, getStreamName(m, meta))
 				setErr(m, meta, err)
 			})
 		default:
@@ -127,6 +228,9 @@ func (p *hostModule) InitContext(ctx context.Context, m api.Module, agent *zongz
 		&meta.ptrErrCap,
 		&meta.ptrErrLen,
 		&meta.ptrErr,
+		&meta.ptrStreamNameCap,
+		&meta.ptrStreamNameLen,
+		&meta.ptrStreamName,
 	} {
 		*v = readUint32(m, ptr+uint32(4*i))
 	}
@@ -143,8 +247,17 @@ func (h *hostModule) ContextCopy(dst, src context.Context) context.Context {
 	return dst
 }
 
+// ContextClose cleans up resources created during ContextCopy.
+func (h *hostModule) ContextClose(ctx context.Context) {
+	h.getStreamList(ctx).release()
+}
+
 func (p *hostModule) agent(ctx context.Context) *zongzi.Agent {
 	return get[*zongzi.Agent](ctx, p.ctxKeyAgent)
+}
+
+func (p *hostModule) getStreamList(ctx context.Context) *streamList {
+	return get[*streamList](ctx, p.ctxKeyStreamList)
 }
 
 func get[T any](ctx context.Context, key string) T {
@@ -159,8 +272,20 @@ func getShardName(m api.Module, meta *meta) []byte {
 	return read(m, meta.ptrShardName, meta.ptrShardNameLen, meta.ptrShardNameCap)
 }
 
-func setShardID(m api.Module, meta *meta, val uint64) {
-	writeUint64(m, meta.ptrVal, val)
+func setShardName(m api.Module, meta *meta, name []byte) {
+	buf := read(m, meta.ptrShardName, 0, meta.ptrShardNameCap)
+	copy(buf[:len(name)], name)
+	writeUint32(m, meta.ptrShardNameLen, uint32(len(name)))
+}
+
+func getStreamName(m api.Module, meta *meta) []byte {
+	return read(m, meta.ptrStreamName, meta.ptrStreamNameLen, meta.ptrStreamNameCap)
+}
+
+func setStreamName(m api.Module, meta *meta, name []byte) {
+	buf := read(m, meta.ptrStreamName, 0, meta.ptrStreamNameCap)
+	copy(buf[:len(name)], name)
+	writeUint32(m, meta.ptrStreamNameLen, uint32(len(name)))
 }
 
 func readUint32(m api.Module, ptr uint32) (val uint32) {
@@ -190,6 +315,10 @@ func setData(m api.Module, meta *meta, b []byte) {
 
 func errBuf(m api.Module, meta *meta) []byte {
 	return read(m, meta.ptrErr, 0, meta.ptrErrCap)
+}
+
+func getErr(m api.Module, meta *meta) []byte {
+	return read(m, meta.ptrErr, meta.ptrErrLen, meta.ptrErrCap)
 }
 
 func setErr(m api.Module, meta *meta, err error) {

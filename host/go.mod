@@ -1,9 +1,10 @@
 module github.com/pantopic/wazero-shard-client/host
 
-go 1.24.3
+go 1.25.1
 
 require (
 	github.com/logbn/zongzi v0.0.19
+	github.com/pantopic/wazero-pool v0.0.6
 	github.com/tetratelabs/wazero v1.9.0
 )
 
