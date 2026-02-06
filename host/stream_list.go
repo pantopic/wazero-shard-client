@@ -52,6 +52,7 @@ func (sl *streamList) new(ctx context.Context, name []byte) (s *stream, err erro
 		list: sl,
 	}
 	s.ctx, s.cancel = context.WithCancel(ctx)
+	sl.items[base64.URLEncoding.EncodeToString(name)] = s
 	return
 }
 

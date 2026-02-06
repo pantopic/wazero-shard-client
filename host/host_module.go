@@ -2,6 +2,7 @@ package wazero_shard_client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -116,9 +117,10 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 							if _, err = mod.ExportedFunction("__shard_client_stream_recv").Call(ctx); err != nil {
 								return
 							}
-							if err := getErr(mod, meta); err != nil {
-								slog.Error("Error receiving stream message", "name", s.name, "err", err)
+							if err = getErr(mod, meta); err != nil {
+								slog.Error("Error receiving stream message", "name", s.name, "err", err.Error())
 								s.close()
+								return
 							}
 						})
 					case <-s.ctx.Done():
@@ -141,13 +143,13 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			})
 			return
 		},
-		"__shard_client_stream_send": func(ctx context.Context, name, msg []byte) (err error) {
+		"__shard_client_stream_send": func(ctx context.Context, name, data []byte) (err error) {
 			s, err := p.getStreamList(ctx).find(name)
 			if err != nil {
 				return
 			}
 			select {
-			case s.in <- msg:
+			case s.in <- data:
 			case <-ctx.Done():
 				err = ErrStreamClosed
 			}
@@ -179,7 +181,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 				setData(m, meta, data)
 				setErr(m, meta, err)
 			})
-		case func(ctx context.Context, client zongzi.ShardClient, name []byte) (err error):
+		case func(context.Context, zongzi.ShardClient, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, p.ctxKeyMeta)
 				client := p.agent(ctx).ClientByName(fmt.Sprintf(`%s.%s.%s`,
@@ -189,13 +191,13 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 				err := fn(ctx, client, getStreamName(m, meta))
 				setErr(m, meta, err)
 			})
-		case func(ctx context.Context, name, msg []byte) (err error):
+		case func(context.Context, []byte, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, p.ctxKeyMeta)
 				err := fn(ctx, getStreamName(m, meta), getData(m, meta))
 				setErr(m, meta, err)
 			})
-		case func(ctx context.Context, name []byte) (err error):
+		case func(context.Context, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, p.ctxKeyMeta)
 				err := fn(ctx, getStreamName(m, meta))
@@ -317,8 +319,11 @@ func errBuf(m api.Module, meta *meta) []byte {
 	return read(m, meta.ptrErr, 0, meta.ptrErrCap)
 }
 
-func getErr(m api.Module, meta *meta) []byte {
-	return read(m, meta.ptrErr, meta.ptrErrLen, meta.ptrErrCap)
+func getErr(m api.Module, meta *meta) (err error) {
+	if b := read(m, meta.ptrErr, meta.ptrErrLen, meta.ptrErrCap); len(b) > 0 {
+		err = errors.New(string(b))
+	}
+	return
 }
 
 func setErr(m api.Module, meta *meta, err error) {

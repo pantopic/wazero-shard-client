@@ -46,10 +46,6 @@ func __shard_client() uint32 {
 
 //export __shard_client_stream_recv
 func __shard_client_stream_recv() {
-	if streamRecv == nil {
-		setErr(ErrStreamRecvNotRegistered)
-		return
-	}
 	streamRecv(getShardName(), getStreamName(), getData(), getVal())
 }
 
