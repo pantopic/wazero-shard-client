@@ -6,12 +6,6 @@ import (
 
 type Option func(*hostModule)
 
-func WithCtxKeyMeta(key string) Option {
-	return func(p *hostModule) {
-		p.ctxKeyMeta = key
-	}
-}
-
 // WithNamespace specifies a static namespace for all invocations
 func WithNamespace(name string) Option {
 	return WithNamespaceResolver(func(ctx context.Context) string {

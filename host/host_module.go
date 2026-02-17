@@ -19,10 +19,9 @@ import (
 const Name = "pantopic/wazero-shard-client"
 
 var (
-	DefaultCtxKeyMeta       = `wazero_shard_client_meta`
-	DefaultCtxKeyAgent      = `wazero_shard_client_agent`
-	DefaultCtxKeyModPool    = `wazero_shard_client_mod_pool`
-	DefaultCtxKeyStreamList = `wazero_shard_client_stream_list`
+	ctxKeyMeta       = Name + `meta`
+	ctxKeyModPool    = Name + `mod_pool`
+	ctxKeyStreamList = Name + `stream_list`
 )
 
 type meta struct {
@@ -44,22 +43,15 @@ type meta struct {
 type hostModule struct {
 	sync.RWMutex
 
-	module           api.Module
-	ctxKeyMeta       string
-	ctxKeyAgent      string
-	ctxKeyModPool    string
-	ctxKeyStreamList string
+	module api.Module
+	agent  *zongzi.Agent
 
 	resolveNamespace func(context.Context) string
 	resolveResource  func(context.Context) string
 }
 
-func New(opts ...Option) *hostModule {
+func New(agent *zongzi.Agent, opts ...Option) *hostModule {
 	p := &hostModule{
-		ctxKeyMeta:       DefaultCtxKeyMeta,
-		ctxKeyAgent:      DefaultCtxKeyAgent,
-		ctxKeyModPool:    DefaultCtxKeyModPool,
-		ctxKeyStreamList: DefaultCtxKeyStreamList,
 		resolveNamespace: func(ctx context.Context) string {
 			return `default`
 		},
@@ -108,7 +100,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 				for {
 					select {
 					case res := <-s.out:
-						meta := get[*meta](ctx, p.ctxKeyMeta)
+						meta := get[*meta](ctx, ctxKeyMeta)
 						wazeropool.Context(ctx).Run(func(mod api.Module) {
 							setStreamName(mod, meta, name)
 							setVal(mod, meta, res.Value)
@@ -171,8 +163,8 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		switch fn := fn.(type) {
 		case func(context.Context, zongzi.ShardClient, []byte) (uint64, []byte, error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
-				meta := get[*meta](ctx, p.ctxKeyMeta)
-				client := p.agent(ctx).ClientByName(fmt.Sprintf(`%s.%s.%s`,
+				meta := get[*meta](ctx, ctxKeyMeta)
+				client := p.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
 					p.resolveNamespace(ctx),
 					p.resolveResource(ctx),
 					getShardName(m, meta)))
@@ -183,8 +175,8 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			})
 		case func(context.Context, zongzi.ShardClient, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
-				meta := get[*meta](ctx, p.ctxKeyMeta)
-				client := p.agent(ctx).ClientByName(fmt.Sprintf(`%s.%s.%s`,
+				meta := get[*meta](ctx, ctxKeyMeta)
+				client := p.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
 					p.resolveNamespace(ctx),
 					p.resolveResource(ctx),
 					getShardName(m, meta)))
@@ -193,13 +185,13 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			})
 		case func(context.Context, []byte, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
-				meta := get[*meta](ctx, p.ctxKeyMeta)
+				meta := get[*meta](ctx, ctxKeyMeta)
 				err := fn(ctx, getStreamName(m, meta), getData(m, meta))
 				setErr(m, meta, err)
 			})
 		case func(context.Context, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
-				meta := get[*meta](ctx, p.ctxKeyMeta)
+				meta := get[*meta](ctx, ctxKeyMeta)
 				err := fn(ctx, getStreamName(m, meta))
 				setErr(m, meta, err)
 			})
@@ -212,7 +204,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 }
 
 // InitContext retrieves the meta page from the wasm module
-func (p *hostModule) InitContext(ctx context.Context, m api.Module, agent *zongzi.Agent) (context.Context, error) {
+func (h *hostModule) InitContext(ctx context.Context, m api.Module) (context.Context, error) {
 	stack, err := m.ExportedFunction(`__shard_client`).Call(ctx)
 	if err != nil {
 		return ctx, err
@@ -236,16 +228,14 @@ func (p *hostModule) InitContext(ctx context.Context, m api.Module, agent *zongz
 	} {
 		*v = readUint32(m, ptr+uint32(4*i))
 	}
-	ctx = context.WithValue(ctx, p.ctxKeyMeta, meta)
-	ctx = context.WithValue(ctx, p.ctxKeyAgent, agent)
+	ctx = context.WithValue(ctx, ctxKeyMeta, meta)
 	return ctx, nil
 }
 
 // ContextCopy populates dst context with the meta page from src context.
 func (h *hostModule) ContextCopy(dst, src context.Context) context.Context {
-	dst = context.WithValue(dst, h.ctxKeyMeta, get[*meta](src, h.ctxKeyMeta))
-	dst = context.WithValue(dst, h.ctxKeyAgent, h.agent(src))
-	dst = context.WithValue(dst, h.ctxKeyStreamList, newStreamList())
+	dst = context.WithValue(dst, ctxKeyMeta, get[*meta](src, ctxKeyMeta))
+	dst = context.WithValue(dst, ctxKeyStreamList, newStreamList())
 	return dst
 }
 
@@ -254,12 +244,8 @@ func (h *hostModule) ContextClose(ctx context.Context) {
 	h.getStreamList(ctx).release()
 }
 
-func (p *hostModule) agent(ctx context.Context) *zongzi.Agent {
-	return get[*zongzi.Agent](ctx, p.ctxKeyAgent)
-}
-
 func (p *hostModule) getStreamList(ctx context.Context) *streamList {
-	return get[*streamList](ctx, p.ctxKeyStreamList)
+	return get[*streamList](ctx, ctxKeyStreamList)
 }
 
 func get[T any](ctx context.Context, key string) T {
