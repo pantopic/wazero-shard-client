@@ -19,9 +19,8 @@ import (
 const Name = "pantopic/wazero-shard-client"
 
 var (
-	ctxKeyMeta       = Name + `meta`
-	ctxKeyModPool    = Name + `mod_pool`
-	ctxKeyStreamList = Name + `stream_list`
+	ctxKeyMeta       = Name + `/meta`
+	ctxKeyStreamList = Name + `/stream_list`
 )
 
 type meta struct {
@@ -51,7 +50,8 @@ type hostModule struct {
 }
 
 func New(agent *zongzi.Agent, opts ...Option) *hostModule {
-	p := &hostModule{
+	h := &hostModule{
+		agent: agent,
 		resolveNamespace: func(ctx context.Context) string {
 			return `default`
 		},
@@ -60,17 +60,17 @@ func New(agent *zongzi.Agent, opts ...Option) *hostModule {
 		},
 	}
 	for _, opt := range opts {
-		opt(p)
+		opt(h)
 	}
-	return p
+	return h
 }
 
-func (p *hostModule) Name() string {
+func (h *hostModule) Name() string {
 	return Name
 }
 
 // Register instantiates the host module, making it available to all module instances in this runtime
-func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error) {
+func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error) {
 	builder := r.NewHostModuleBuilder(Name)
 	register := func(name string, fn func(ctx context.Context, m api.Module, stack []uint64)) {
 		builder = builder.NewFunctionBuilder().WithGoModuleFunction(api.GoModuleFunc(fn), nil, nil).Export(name)
@@ -86,7 +86,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			return client.Read(ctx, query, true)
 		},
 		"__shard_client_stream_open": func(ctx context.Context, client zongzi.ShardClient, name []byte) (err error) {
-			s, err := p.getStreamList(ctx).new(ctx, name)
+			s, err := h.getStreamList(ctx).new(ctx, name)
 			if err != nil {
 				return
 			}
@@ -123,7 +123,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			return
 		},
 		"__shard_client_stream_open_local": func(ctx context.Context, client zongzi.ShardClient, name []byte) (err error) {
-			s, err := p.getStreamList(ctx).new(ctx, name)
+			s, err := h.getStreamList(ctx).new(ctx, name)
 			if err != nil {
 				return
 			}
@@ -136,7 +136,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			return
 		},
 		"__shard_client_stream_send": func(ctx context.Context, name, data []byte) (err error) {
-			s, err := p.getStreamList(ctx).find(name)
+			s, err := h.getStreamList(ctx).find(name)
 			if err != nil {
 				return
 			}
@@ -148,7 +148,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			return
 		},
 		"__shard_client_stream_close": func(ctx context.Context, name []byte) (err error) {
-			s, err := p.getStreamList(ctx).find(name)
+			s, err := h.getStreamList(ctx).find(name)
 			if err != nil {
 				return
 			}
@@ -164,9 +164,9 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		case func(context.Context, zongzi.ShardClient, []byte) (uint64, []byte, error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, ctxKeyMeta)
-				client := p.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
-					p.resolveNamespace(ctx),
-					p.resolveResource(ctx),
+				client := h.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
+					h.resolveNamespace(ctx),
+					h.resolveResource(ctx),
 					getShardName(m, meta)))
 				val, data, err := fn(ctx, client, getData(m, meta))
 				setVal(m, meta, val)
@@ -176,9 +176,9 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		case func(context.Context, zongzi.ShardClient, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, ctxKeyMeta)
-				client := p.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
-					p.resolveNamespace(ctx),
-					p.resolveResource(ctx),
+				client := h.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
+					h.resolveNamespace(ctx),
+					h.resolveResource(ctx),
 					getShardName(m, meta)))
 				err := fn(ctx, client, getStreamName(m, meta))
 				setErr(m, meta, err)
@@ -199,7 +199,7 @@ func (p *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			log.Panicf("Method signature implementation missing: %#v", fn)
 		}
 	}
-	p.module, err = builder.Instantiate(ctx)
+	h.module, err = builder.Instantiate(ctx)
 	return
 }
 
@@ -244,7 +244,7 @@ func (h *hostModule) ContextClose(ctx context.Context) {
 	h.getStreamList(ctx).release()
 }
 
-func (p *hostModule) getStreamList(ctx context.Context) *streamList {
+func (h *hostModule) getStreamList(ctx context.Context) *streamList {
 	return get[*streamList](ctx, ctxKeyStreamList)
 }
 
@@ -294,6 +294,10 @@ func dataBuf(m api.Module, meta *meta) []byte {
 
 func setVal(m api.Module, meta *meta, val uint64) {
 	writeUint64(m, meta.ptrVal, val)
+}
+
+func getVal(m api.Module, meta *meta) (val uint64) {
+	return readUint64(m, meta.ptrVal)
 }
 
 func setData(m api.Module, meta *meta, b []byte) {

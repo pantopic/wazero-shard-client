@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/logbn/zongzi v0.0.19
 	github.com/pantopic/wazero-pool v0.0.6
-	github.com/tetratelabs/wazero v1.9.0
+	github.com/tetratelabs/wazero v1.11.0
 )
 
 require (
