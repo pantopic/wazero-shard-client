@@ -101,7 +101,7 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 					select {
 					case res := <-s.out:
 						meta := get[*meta](ctx, ctxKeyMeta)
-						wazeropool.Context(ctx).Run(func(mod api.Module) {
+						wazeropool.FromContext(ctx).Run(func(mod api.Module) {
 							setStreamName(mod, meta, name)
 							setVal(mod, meta, res.Value)
 							setData(mod, meta, res.Data)
