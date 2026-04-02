@@ -186,7 +186,7 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		case func(context.Context, []byte, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, ctxKeyMeta)
-				err := fn(ctx, getStreamName(m, meta), getData(m, meta))
+				err := fn(ctx, getStreamName(m, meta), getDataCopy(m, meta))
 				setErr(m, meta, err)
 			})
 		case func(context.Context, []byte) (err error):
@@ -286,6 +286,10 @@ func readUint32(m api.Module, ptr uint32) (val uint32) {
 
 func getData(m api.Module, meta *meta) []byte {
 	return read(m, meta.ptrData, meta.ptrDataLen, meta.ptrDataCap)
+}
+
+func getDataCopy(m api.Module, meta *meta) []byte {
+	return append([]byte(nil), getData(m, meta)...)
 }
 
 func dataBuf(m api.Module, meta *meta) []byte {
