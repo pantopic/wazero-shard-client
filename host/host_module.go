@@ -98,26 +98,26 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			})
 			s.wg.Go(func() {
 				for {
-					res, ok := <-s.out
-					if !ok {
-						s.close()
+					select {
+					case res := <-s.out:
+						meta := get[*meta](ctx, ctxKeyMeta)
+						wazeropool.FromContext(ctx).Run(func(mod api.Module) {
+							setStreamName(mod, meta, name)
+							setVal(mod, meta, res.Value)
+							setData(mod, meta, res.Data)
+							setErr(mod, meta, nil)
+							if _, err = mod.ExportedFunction("__shard_client_stream_recv").Call(ctx); err != nil {
+								return
+							}
+							if err = getErr(mod, meta); err != nil {
+								slog.Error("Error receiving stream message", "name", s.name, "err", err.Error())
+								s.close()
+								return
+							}
+						})
+					case <-s.ctx.Done():
 						return
 					}
-					meta := get[*meta](ctx, ctxKeyMeta)
-					wazeropool.FromContext(ctx).Run(func(mod api.Module) {
-						setStreamName(mod, meta, name)
-						setVal(mod, meta, res.Value)
-						setData(mod, meta, res.Data)
-						setErr(mod, meta, nil)
-						if _, err = mod.ExportedFunction("__shard_client_stream_recv").Call(ctx); err != nil {
-							return
-						}
-						if err = getErr(mod, meta); err != nil {
-							slog.Error("Error receiving stream message", "name", s.name, "err", err.Error())
-							s.close()
-							return
-						}
-					})
 				}
 			})
 			return
@@ -167,7 +167,8 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 				client := h.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
 					h.resolveNamespace(ctx),
 					h.resolveResource(ctx),
-					getShardName(m, meta)))
+					getShardName(m, meta),
+				), zongzi.WithWriteToLeader())
 				val, data, err := fn(ctx, client, getData(m, meta))
 				setVal(m, meta, val)
 				setData(m, meta, data)
@@ -179,7 +180,8 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 				client := h.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
 					h.resolveNamespace(ctx),
 					h.resolveResource(ctx),
-					getShardName(m, meta)))
+					getShardName(m, meta),
+				), zongzi.WithWriteToLeader())
 				err := fn(ctx, client, getStreamName(m, meta))
 				setErr(m, meta, err)
 			})
