@@ -1,14 +1,16 @@
 package shard_client
 
 type Client struct {
-	shardName []byte
+	componentName []byte
+	shardName     []byte
 }
 
-func New(name []byte) Client {
-	return Client{name}
+func New(componentName, shardName []byte) Client {
+	return Client{componentName, shardName}
 }
 
 func (c Client) Read(query []byte, stale bool) (val uint64, res []byte, err error) {
+	setComponentName(c.componentName)
 	setShardName(c.shardName)
 	setData(query)
 	if stale {
@@ -20,6 +22,7 @@ func (c Client) Read(query []byte, stale bool) (val uint64, res []byte, err erro
 }
 
 func (c Client) Apply(cmd []byte) (val uint64, res []byte, err error) {
+	setComponentName(c.componentName)
 	setShardName(c.shardName)
 	setData(cmd)
 	apply()
@@ -30,6 +33,7 @@ func (c Client) StreamOpen(name []byte) (err error) {
 	if streamRecv == nil {
 		return ErrStreamRecvNotRegistered
 	}
+	setComponentName(c.componentName)
 	setShardName(c.shardName)
 	setStreamName(name)
 	streamOpen()
@@ -40,6 +44,7 @@ func (c Client) StreamOpenLocal(name []byte) (err error) {
 	if streamRecv == nil {
 		return ErrStreamRecvNotRegistered
 	}
+	setComponentName(c.componentName)
 	setShardName(c.shardName)
 	setStreamName(name)
 	streamOpenLocal()
@@ -47,7 +52,6 @@ func (c Client) StreamOpenLocal(name []byte) (err error) {
 }
 
 func (c Client) StreamSend(name, data []byte) (err error) {
-	setShardName(c.shardName)
 	setStreamName(name)
 	setData(data)
 	streamSend()
@@ -55,7 +59,6 @@ func (c Client) StreamSend(name, data []byte) (err error) {
 }
 
 func (c Client) StreamClose(name []byte) (err error) {
-	setShardName(c.shardName)
 	setStreamName(name)
 	streamClose()
 	return getErr()
