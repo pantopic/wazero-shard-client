@@ -224,7 +224,11 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 
 // InitContext retrieves the meta page from the wasm module
 func (h *hostModule) InitContext(ctx context.Context, m api.Module) (context.Context, error) {
-	stack, err := m.ExportedFunction(`__shard_client`).Call(ctx)
+	fn := m.ExportedFunction(`__shard_client`)
+	if fn == nil {
+		return ctx, nil
+	}
+	stack, err := fn.Call(ctx)
 	if err != nil {
 		return ctx, err
 	}
@@ -256,8 +260,10 @@ func (h *hostModule) InitContext(ctx context.Context, m api.Module) (context.Con
 
 // ContextCopy populates dst context with the meta page from src context.
 func (h *hostModule) ContextCopy(dst, src context.Context) context.Context {
-	dst = context.WithValue(dst, ctxKeyMeta, get[*meta](src, ctxKeyMeta))
-	dst = context.WithValue(dst, ctxKeyStreamList, newStreamList())
+	if v := src.Value(ctxKeyMeta); v != nil {
+		dst = context.WithValue(dst, ctxKeyMeta, v.(*meta))
+		dst = context.WithValue(dst, ctxKeyStreamList, newStreamList())
+	}
 	return dst
 }
 
