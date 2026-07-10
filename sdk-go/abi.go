@@ -4,24 +4,27 @@ import (
 	"unsafe"
 )
 
-type streamRecvFunc func(shardName, streamName, data []byte, val uint64)
+type streamRecvFunc func(name, data []byte, val uint64)
 
 var (
-	meta          = make([]uint32, 13)
-	val           uint64
-	shardNameCap  uint32 = 256
-	shardNameLen  uint32
-	dataCap       uint32 = 2 << 20 // 2 MiB
-	dataLen       uint32
-	errCap        uint32 = 1024
-	errLen        uint32
-	streamNameCap uint32 = 64
-	streamNameLen uint32
+	meta             = make([]uint32, 16)
+	val              uint64
+	shardNameCap     uint32 = 64
+	shardNameLen     uint32
+	componentNameCap uint32 = 64
+	componentNameLen uint32
+	dataCap          uint32 = 2 << 20 // 2 MiB
+	dataLen          uint32
+	errCap           uint32 = 1024
+	errLen           uint32
+	streamNameCap    uint32 = 64
+	streamNameLen    uint32
 
-	streamName = make([]byte, 64)
-	shardName  = make([]byte, int(shardNameCap))
-	data       = make([]byte, int(dataCap))
-	err        = make([]byte, int(errCap))
+	streamName    = make([]byte, 64)
+	componentName = make([]byte, int(componentNameCap))
+	shardName     = make([]byte, int(shardNameCap))
+	data          = make([]byte, int(dataCap))
+	err           = make([]byte, int(errCap))
 
 	streamRecv streamRecvFunc
 )
@@ -29,24 +32,36 @@ var (
 //export __shard_client
 func __shard_client() uint32 {
 	meta[0] = uint32(uintptr(unsafe.Pointer(&val)))
-	meta[1] = uint32(uintptr(unsafe.Pointer(&shardNameCap)))
-	meta[2] = uint32(uintptr(unsafe.Pointer(&shardNameLen)))
-	meta[3] = uint32(uintptr(unsafe.Pointer(&shardName[0])))
-	meta[4] = uint32(uintptr(unsafe.Pointer(&dataCap)))
-	meta[5] = uint32(uintptr(unsafe.Pointer(&dataLen)))
-	meta[6] = uint32(uintptr(unsafe.Pointer(&data[0])))
-	meta[7] = uint32(uintptr(unsafe.Pointer(&errCap)))
-	meta[8] = uint32(uintptr(unsafe.Pointer(&errLen)))
-	meta[9] = uint32(uintptr(unsafe.Pointer(&err[0])))
-	meta[10] = uint32(uintptr(unsafe.Pointer(&streamNameCap)))
-	meta[11] = uint32(uintptr(unsafe.Pointer(&streamNameLen)))
-	meta[12] = uint32(uintptr(unsafe.Pointer(&streamName[0])))
+	meta[1] = uint32(uintptr(unsafe.Pointer(&componentNameCap)))
+	meta[2] = uint32(uintptr(unsafe.Pointer(&componentNameLen)))
+	meta[3] = uint32(uintptr(unsafe.Pointer(&componentName[0])))
+	meta[4] = uint32(uintptr(unsafe.Pointer(&shardNameCap)))
+	meta[5] = uint32(uintptr(unsafe.Pointer(&shardNameLen)))
+	meta[6] = uint32(uintptr(unsafe.Pointer(&shardName[0])))
+	meta[7] = uint32(uintptr(unsafe.Pointer(&dataCap)))
+	meta[8] = uint32(uintptr(unsafe.Pointer(&dataLen)))
+	meta[9] = uint32(uintptr(unsafe.Pointer(&data[0])))
+	meta[10] = uint32(uintptr(unsafe.Pointer(&errCap)))
+	meta[11] = uint32(uintptr(unsafe.Pointer(&errLen)))
+	meta[12] = uint32(uintptr(unsafe.Pointer(&err[0])))
+	meta[13] = uint32(uintptr(unsafe.Pointer(&streamNameCap)))
+	meta[14] = uint32(uintptr(unsafe.Pointer(&streamNameLen)))
+	meta[15] = uint32(uintptr(unsafe.Pointer(&streamName[0])))
 	return uint32(uintptr(unsafe.Pointer(&meta[0])))
 }
 
 //export __shard_client_stream_recv
 func __shard_client_stream_recv() {
-	streamRecv(getShardName(), getStreamName(), getData(), getVal())
+	streamRecv(getStreamName(), getData(), getVal())
+}
+
+func setComponentName(name []byte) {
+	copy(componentName[:len(name)], name)
+	componentNameLen = uint32(len(name))
+}
+
+func getComponentName() []byte {
+	return componentName[:componentNameLen]
 }
 
 func setShardName(name []byte) {

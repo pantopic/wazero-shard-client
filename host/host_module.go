@@ -21,22 +21,27 @@ const Name = "pantopic/wazero-shard-client"
 var (
 	ctxKeyMeta       = Name + `/meta`
 	ctxKeyStreamList = Name + `/stream_list`
+	ctxKeyNamespace  = Name + `/namespace`
+	ctxKeyResource   = Name + `/resource`
 )
 
 type meta struct {
-	ptrData          uint32
-	ptrDataCap       uint32
-	ptrDataLen       uint32
-	ptrErr           uint32
-	ptrErrCap        uint32
-	ptrErrLen        uint32
-	ptrShardName     uint32
-	ptrShardNameCap  uint32
-	ptrShardNameLen  uint32
-	ptrStreamName    uint32
-	ptrStreamNameCap uint32
-	ptrStreamNameLen uint32
-	ptrVal           uint32
+	ptrData             uint32
+	ptrDataCap          uint32
+	ptrDataLen          uint32
+	ptrErr              uint32
+	ptrErrCap           uint32
+	ptrErrLen           uint32
+	ptrComponentName    uint32
+	ptrComponentNameCap uint32
+	ptrComponentNameLen uint32
+	ptrShardName        uint32
+	ptrShardNameCap     uint32
+	ptrShardNameLen     uint32
+	ptrStreamName       uint32
+	ptrStreamNameCap    uint32
+	ptrStreamNameLen    uint32
+	ptrVal              uint32
 }
 
 type hostModule struct {
@@ -44,20 +49,11 @@ type hostModule struct {
 
 	module api.Module
 	agent  *zongzi.Agent
-
-	resolveNamespace func(context.Context) string
-	resolveResource  func(context.Context) string
 }
 
 func New(agent *zongzi.Agent, opts ...Option) *hostModule {
 	h := &hostModule{
 		agent: agent,
-		resolveNamespace: func(ctx context.Context) string {
-			return `default`
-		},
-		resolveResource: func(ctx context.Context) string {
-			return `default`
-		},
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -67,6 +63,20 @@ func New(agent *zongzi.Agent, opts ...Option) *hostModule {
 
 func (h *hostModule) Name() string {
 	return Name
+}
+
+func (h *hostModule) resolveNamespace(ctx context.Context) (namespace string) {
+	if v := ctx.Value(ctxKeyNamespace); v != nil {
+		namespace = v.(string)
+	}
+	return
+}
+
+func (h *hostModule) resolveResource(ctx context.Context) (resource string) {
+	if v := ctx.Value(ctxKeyResource); v != nil {
+		resource = v.(string)
+	}
+	return
 }
 
 // Register instantiates the host module, making it available to all module instances in this runtime
@@ -110,7 +120,7 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 								return
 							}
 							if err = getErr(mod, meta); err != nil {
-								slog.Error("Error receiving stream message", "name", s.name, "err", err.Error())
+								slog.Error("Error receiving stream message", "streamName", s.name, "err", err.Error())
 								s.close()
 								return
 							}
@@ -164,11 +174,16 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		case func(context.Context, zongzi.ShardClient, []byte) (uint64, []byte, error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, ctxKeyMeta)
-				client := h.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
+				shardName := fmt.Sprintf(`%s.%s.%s.%s`,
 					h.resolveNamespace(ctx),
 					h.resolveResource(ctx),
+					getComponentName(m, meta),
 					getShardName(m, meta),
-				), zongzi.WithWriteToLeader())
+				)
+				client := h.agent.ClientByName(shardName, zongzi.WithWriteToLeader())
+				if client == nil {
+					panic(`a: ` + shardName)
+				}
 				val, data, err := fn(ctx, client, getData(m, meta))
 				setVal(m, meta, val)
 				setData(m, meta, data)
@@ -177,11 +192,13 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		case func(context.Context, zongzi.ShardClient, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
 				meta := get[*meta](ctx, ctxKeyMeta)
-				client := h.agent.ClientByName(fmt.Sprintf(`%s.%s.%s`,
+				shardName := fmt.Sprintf(`%s.%s.%s.%s`,
 					h.resolveNamespace(ctx),
 					h.resolveResource(ctx),
+					getComponentName(m, meta),
 					getShardName(m, meta),
-				), zongzi.WithWriteToLeader())
+				)
+				client := h.agent.ClientByName(shardName, zongzi.WithWriteToLeader())
 				err := fn(ctx, client, getStreamName(m, meta))
 				setErr(m, meta, err)
 			})
@@ -215,6 +232,9 @@ func (h *hostModule) InitContext(ctx context.Context, m api.Module) (context.Con
 	ptr := uint32(stack[0])
 	for i, v := range []*uint32{
 		&meta.ptrVal,
+		&meta.ptrComponentNameCap,
+		&meta.ptrComponentNameLen,
+		&meta.ptrComponentName,
 		&meta.ptrShardNameCap,
 		&meta.ptrShardNameLen,
 		&meta.ptrShardName,
@@ -256,6 +276,16 @@ func get[T any](ctx context.Context, key string) T {
 		log.Panicf("Context item missing %s", key)
 	}
 	return v.(T)
+}
+
+func getComponentName(m api.Module, meta *meta) []byte {
+	return read(m, meta.ptrComponentName, meta.ptrComponentNameLen, meta.ptrComponentNameCap)
+}
+
+func setComponentName(m api.Module, meta *meta, name []byte) {
+	buf := read(m, meta.ptrComponentName, 0, meta.ptrComponentNameCap)
+	copy(buf[:len(name)], name)
+	writeUint32(m, meta.ptrComponentNameLen, uint32(len(name)))
 }
 
 func getShardName(m api.Module, meta *meta) []byte {
