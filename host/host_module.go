@@ -12,6 +12,7 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 
+	"github.com/pantopic/wazero-cluster/host"
 	"github.com/pantopic/wazero-pool"
 )
 
@@ -21,8 +22,6 @@ const Name = "pantopic/wazero-shard-client"
 var (
 	ctxKeyMeta       = Name + `/meta`
 	ctxKeyStreamList = Name + `/stream_list`
-	ctxKeyNamespace  = Name + `/namespace`
-	ctxKeyResource   = Name + `/resource`
 )
 
 type meta struct {
@@ -66,17 +65,11 @@ func (h *hostModule) Name() string {
 }
 
 func (h *hostModule) resolveNamespace(ctx context.Context) (namespace string) {
-	if v := ctx.Value(ctxKeyNamespace); v != nil {
-		namespace = v.(string)
-	}
-	return
+	return wazero_cluster.NamespaceFrom(ctx)
 }
 
 func (h *hostModule) resolveResource(ctx context.Context) (resource string) {
-	if v := ctx.Value(ctxKeyResource); v != nil {
-		resource = v.(string)
-	}
-	return
+	return wazero_cluster.ResourceFrom(ctx)
 }
 
 // Register instantiates the host module, making it available to all module instances in this runtime
