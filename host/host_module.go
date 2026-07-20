@@ -102,7 +102,10 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 			s.wg.Go(func() {
 				for {
 					select {
-					case res := <-s.out:
+					case res, ok := <-s.out:
+						if !ok {
+							return
+						}
 						meta := get[*meta](ctx, ctxKeyMeta)
 						wazeropool.FromContext(ctx).Run(func(mod api.Module) {
 							setStreamName(mod, meta, name)
