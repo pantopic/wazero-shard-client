@@ -78,6 +78,24 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 	register := func(name string, fn func(ctx context.Context, m api.Module, stack []uint64)) {
 		builder = builder.NewFunctionBuilder().WithGoModuleFunction(api.GoModuleFunc(fn), nil, nil).Export(name)
 	}
+	asyncRecv := func(ctx context.Context, name, data []byte, val uint64, err error) {
+		meta := get[*meta](ctx, ctxKeyMeta)
+		wazeropool.FromContext(ctx).Run(func(mod api.Module) {
+			setStreamName(mod, meta, name)
+			setVal(mod, meta, val)
+			if err = setData(mod, meta, data); err != nil {
+				return
+			}
+			setErr(mod, meta, err)
+			if _, err = mod.ExportedFunction("__shard_client_async_recv").Call(ctx); err != nil {
+				return
+			}
+			if err = getErr(mod, meta); err != nil {
+				slog.Error("Error receiving async response", "err", err.Error())
+				return
+			}
+		})
+	}
 	for name, fn := range map[string]any{
 		"__shard_client_apply": func(ctx context.Context, client zongzi.ShardClient, cmd []byte) (val uint64, res []byte, err error) {
 			return client.Apply(ctx, cmd)
@@ -87,6 +105,24 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 		},
 		"__shard_client_read_local": func(ctx context.Context, client zongzi.ShardClient, query []byte) (val uint64, res []byte, err error) {
 			return client.Read(ctx, query, true)
+		},
+		"__shard_client_async_apply": func(ctx context.Context, client zongzi.ShardClient, cmd, name []byte) {
+			go func() {
+				val, data, err := client.Apply(ctx, cmd)
+				asyncRecv(ctx, name, data, val, err)
+			}()
+		},
+		"__shard_client_async_read": func(ctx context.Context, client zongzi.ShardClient, query, name []byte) {
+			go func() {
+				val, data, err := client.Read(ctx, query, false)
+				asyncRecv(ctx, name, data, val, err)
+			}()
+		},
+		"__shard_client_async_read_local": func(ctx context.Context, client zongzi.ShardClient, query, name []byte) {
+			go func() {
+				val, data, err := client.Read(ctx, query, true)
+				asyncRecv(ctx, name, data, val, err)
+			}()
 		},
 		"__shard_client_stream_open": func(ctx context.Context, client zongzi.ShardClient, name []byte) (err error) {
 			s, err := h.getStreamList(ctx).new(ctx, name)
@@ -184,6 +220,21 @@ func (h *hostModule) Register(ctx context.Context, r wazero.Runtime) (err error)
 				setVal(m, meta, val)
 				setData(m, meta, data)
 				setErr(m, meta, err)
+			})
+		case func(context.Context, zongzi.ShardClient, []byte, []byte):
+			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
+				meta := get[*meta](ctx, ctxKeyMeta)
+				shardName := fmt.Sprintf(`%s.%s.%s.%s`,
+					h.resolveNamespace(ctx),
+					h.resolveResource(ctx),
+					getComponentName(m, meta),
+					getShardName(m, meta),
+				)
+				client := h.agent.ClientByName(shardName, zongzi.WithWriteToLeader())
+				if client == nil {
+					panic(`a: ` + shardName)
+				}
+				fn(ctx, client, getDataCopy(m, meta), getStreamNameCopy(m, meta))
 			})
 		case func(context.Context, zongzi.ShardClient, []byte) (err error):
 			register(name, func(ctx context.Context, m api.Module, stack []uint64) {
@@ -304,18 +355,14 @@ func getStreamName(m api.Module, meta *meta) []byte {
 	return read(m, meta.ptrStreamName, meta.ptrStreamNameLen, meta.ptrStreamNameCap)
 }
 
+func getStreamNameCopy(m api.Module, meta *meta) []byte {
+	return append([]byte(nil), getStreamName(m, meta)...)
+}
+
 func setStreamName(m api.Module, meta *meta, name []byte) {
 	buf := read(m, meta.ptrStreamName, 0, meta.ptrStreamNameCap)
 	copy(buf[:len(name)], name)
 	writeUint32(m, meta.ptrStreamNameLen, uint32(len(name)))
-}
-
-func readUint32(m api.Module, ptr uint32) (val uint32) {
-	val, ok := m.Memory().ReadUint32Le(ptr)
-	if !ok {
-		log.Panicf("Memory.Read(%d) out of range", ptr)
-	}
-	return
 }
 
 func getData(m api.Module, meta *meta) []byte {
@@ -338,9 +385,15 @@ func getVal(m api.Module, meta *meta) (val uint64) {
 	return readUint64(m, meta.ptrVal)
 }
 
-func setData(m api.Module, meta *meta, b []byte) {
-	copy(dataBuf(m, meta)[:len(b)], b)
+func setData(m api.Module, meta *meta, b []byte) error {
+	buf := dataBuf(m, meta)
+	if len(b) > cap(buf) {
+		writeUint32(m, meta.ptrDataLen, 0)
+		return ErrMessageTooLarge
+	}
+	copy(buf[:len(b)], b)
 	writeUint32(m, meta.ptrDataLen, uint32(len(b)))
+	return nil
 }
 
 func errBuf(m api.Module, meta *meta) []byte {
@@ -369,6 +422,14 @@ func read(m api.Module, ptrData, ptrLen, ptrMax uint32) (buf []byte) {
 		log.Panicf("Memory.Read(%d, %d) out of range", ptrData, ptrLen)
 	}
 	return buf[:readUint32(m, ptrLen)]
+}
+
+func readUint32(m api.Module, ptr uint32) (val uint32) {
+	val, ok := m.Memory().ReadUint32Le(ptr)
+	if !ok {
+		log.Panicf("Memory.Read(%d) out of range", ptr)
+	}
+	return
 }
 
 func readUint64(m api.Module, ptr uint32) (val uint64) {

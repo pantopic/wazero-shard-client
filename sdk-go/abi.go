@@ -5,6 +5,7 @@ import (
 )
 
 type streamRecvFunc func(name, data []byte, val uint64)
+type asyncRecvFunc func(name, data []byte, val uint64, err error)
 
 var (
 	meta             = make([]uint32, 16)
@@ -15,44 +16,54 @@ var (
 	componentNameLen uint32
 	dataCap          uint32 = 2 << 20 // 2 MiB
 	dataLen          uint32
-	errCap           uint32 = 1024
+	errCap           uint32 = 16 << 10 // 16 KiB
 	errLen           uint32
 	streamNameCap    uint32 = 64
 	streamNameLen    uint32
 
-	streamName    = make([]byte, 64)
 	componentName = make([]byte, int(componentNameCap))
-	shardName     = make([]byte, int(shardNameCap))
 	data          = make([]byte, int(dataCap))
 	err           = make([]byte, int(errCap))
+	shardName     = make([]byte, int(shardNameCap))
+	streamName    = make([]byte, int(streamNameCap))
 
 	streamRecv streamRecvFunc
+	asyncRecv  asyncRecvFunc
 )
 
 //export __shard_client
 func __shard_client() uint32 {
-	meta[0] = uint32(uintptr(unsafe.Pointer(&val)))
-	meta[1] = uint32(uintptr(unsafe.Pointer(&componentNameCap)))
-	meta[2] = uint32(uintptr(unsafe.Pointer(&componentNameLen)))
-	meta[3] = uint32(uintptr(unsafe.Pointer(&componentName[0])))
-	meta[4] = uint32(uintptr(unsafe.Pointer(&shardNameCap)))
-	meta[5] = uint32(uintptr(unsafe.Pointer(&shardNameLen)))
-	meta[6] = uint32(uintptr(unsafe.Pointer(&shardName[0])))
-	meta[7] = uint32(uintptr(unsafe.Pointer(&dataCap)))
-	meta[8] = uint32(uintptr(unsafe.Pointer(&dataLen)))
-	meta[9] = uint32(uintptr(unsafe.Pointer(&data[0])))
-	meta[10] = uint32(uintptr(unsafe.Pointer(&errCap)))
-	meta[11] = uint32(uintptr(unsafe.Pointer(&errLen)))
-	meta[12] = uint32(uintptr(unsafe.Pointer(&err[0])))
-	meta[13] = uint32(uintptr(unsafe.Pointer(&streamNameCap)))
-	meta[14] = uint32(uintptr(unsafe.Pointer(&streamNameLen)))
-	meta[15] = uint32(uintptr(unsafe.Pointer(&streamName[0])))
+	for i, p := range []unsafe.Pointer{
+		unsafe.Pointer(&val),
+		unsafe.Pointer(&componentNameCap),
+		unsafe.Pointer(&componentNameLen),
+		unsafe.Pointer(&componentName[0]),
+		unsafe.Pointer(&shardNameCap),
+		unsafe.Pointer(&shardNameLen),
+		unsafe.Pointer(&shardName[0]),
+		unsafe.Pointer(&dataCap),
+		unsafe.Pointer(&dataLen),
+		unsafe.Pointer(&data[0]),
+		unsafe.Pointer(&errCap),
+		unsafe.Pointer(&errLen),
+		unsafe.Pointer(&err[0]),
+		unsafe.Pointer(&streamNameCap),
+		unsafe.Pointer(&streamNameLen),
+		unsafe.Pointer(&streamName[0]),
+	} {
+		meta[i] = uint32(uintptr(p))
+	}
 	return uint32(uintptr(unsafe.Pointer(&meta[0])))
 }
 
 //export __shard_client_stream_recv
 func __shard_client_stream_recv() {
 	streamRecv(getStreamName(), getData(), getVal())
+}
+
+//export __shard_client_async_recv
+func __shard_client_async_recv() {
+	asyncRecv(getStreamName(), getData(), getVal(), getErr())
 }
 
 func setComponentName(name []byte) {
@@ -79,6 +90,16 @@ func setData(v []byte) {
 }
 
 func getData() []byte {
+	// if dataLen > dataCap {
+	// 	res := make([]byte, dataLen)
+	// 	var i uint32
+	// 	for i = 0; i < dataLen; {
+	// 		copy(res[i*dataCap:], data[:min(dataCap, dataLen-(i*dataCap))])
+	// 		i += dataLen
+	// 		_buffer_continue()
+	// 	}
+	// 	return res
+	// }
 	return data[:dataLen]
 }
 
@@ -110,33 +131,50 @@ func setStreamName(name []byte) {
 
 //go:wasm-module pantopic/wazero-shard-client
 //export __shard_client_read
-func read()
+func _read()
 
 //go:wasm-module pantopic/wazero-shard-client
 //export __shard_client_read_local
-func readlocal()
+func _read_local()
 
 //go:wasm-module pantopic/wazero-shard-client
 //export __shard_client_apply
-func apply()
+func _apply()
+
+//go:wasm-module pantopic/wazero-shard-client
+//export __shard_client_async_read
+func _async_read()
+
+//go:wasm-module pantopic/wazero-shard-client
+//export __shard_client_async_read_local
+func _async_read_local()
+
+//go:wasm-module pantopic/wazero-shard-client
+//export __shard_client_async_apply
+func _async_apply()
 
 //go:wasm-module pantopic/wazero-shard-client
 //export __shard_client_stream_open
-func streamOpen()
+func _streamOpen()
 
 //go:wasm-module pantopic/wazero-shard-client
 //export __shard_client_stream_open_local
-func streamOpenLocal()
+func _streamOpenLocal()
 
 //go:wasm-module pantopic/wazero-shard-client
 //export __shard_client_stream_send
-func streamSend()
+func _streamSend()
 
 //go:wasm-module pantopic/wazero-shard-client
 //export __shard_client_stream_close
-func streamClose()
+func _streamClose()
+
+//go:wasm-module pantopic/wazero-shard-client
+//export __shard_client_buffer_continue
+func _buffer_continue()
 
 var _ = __shard_client
 var _ = __shard_client_stream_recv
+var _ = __shard_client_async_recv
 var _ = getShardName
 var _ = setData

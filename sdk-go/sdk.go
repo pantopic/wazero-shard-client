@@ -14,9 +14,9 @@ func (c Client) Read(query []byte, stale bool) (val uint64, res []byte, err erro
 	setShardName(c.shardName)
 	setData(query)
 	if stale {
-		readlocal()
+		_read_local()
 	} else {
-		read()
+		_read()
 	}
 	return getVal(), getData(), getErr()
 }
@@ -25,8 +25,28 @@ func (c Client) Apply(cmd []byte) (val uint64, res []byte, err error) {
 	setComponentName(c.componentName)
 	setShardName(c.shardName)
 	setData(cmd)
-	apply()
+	_apply()
 	return getVal(), getData(), getErr()
+}
+
+func (c Client) AsyncApply(cmd, name []byte) {
+	setComponentName(c.componentName)
+	setShardName(c.shardName)
+	setStreamName(name)
+	setData(cmd)
+	_async_apply()
+}
+
+func (c Client) AsyncRead(query, name []byte, stale bool) {
+	setComponentName(c.componentName)
+	setShardName(c.shardName)
+	setStreamName(name)
+	setData(query)
+	if stale {
+		_async_read_local()
+	} else {
+		_async_read()
+	}
 }
 
 func (c Client) StreamOpen(name []byte) (err error) {
@@ -36,7 +56,7 @@ func (c Client) StreamOpen(name []byte) (err error) {
 	setComponentName(c.componentName)
 	setShardName(c.shardName)
 	setStreamName(name)
-	streamOpen()
+	_streamOpen()
 	return getErr()
 }
 
@@ -47,20 +67,20 @@ func (c Client) StreamOpenLocal(name []byte) (err error) {
 	setComponentName(c.componentName)
 	setShardName(c.shardName)
 	setStreamName(name)
-	streamOpenLocal()
+	_streamOpenLocal()
 	return getErr()
 }
 
 func (c Client) StreamSend(name, data []byte) (err error) {
 	setStreamName(name)
 	setData(data)
-	streamSend()
+	_streamSend()
 	return getErr()
 }
 
 func (c Client) StreamClose(name []byte) (err error) {
 	setStreamName(name)
-	streamClose()
+	_streamClose()
 	return getErr()
 }
 
@@ -69,5 +89,13 @@ func RegisterStreamRecv(fn streamRecvFunc) (err error) {
 		return ErrStreamRecvAlreadyRegistered
 	}
 	streamRecv = fn
+	return
+}
+
+func RegisterAsyncRecv(fn asyncRecvFunc) (err error) {
+	if asyncRecv != nil {
+		return ErrAsyncRecvAlreadyRegistered
+	}
+	asyncRecv = fn
 	return
 }
