@@ -169,10 +169,6 @@ func _streamSend()
 //export __shard_client_stream_close
 func _streamClose()
 
-//go:wasm-module pantopic/wazero-shard-client
-//export __shard_client_buffer_continue
-func _buffer_continue()
-
 var _ = __shard_client
 var _ = __shard_client_stream_recv
 var _ = __shard_client_async_recv
