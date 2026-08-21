@@ -27,7 +27,7 @@ pub const Client = struct {
         abi.setShardName(self.shard_name);
         abi.setData(query);
         if (stale) {
-            abi.readLocal();
+            abi.read_local();
         } else {
             abi.read();
         }
@@ -50,6 +50,26 @@ pub const Client = struct {
         };
     }
 
+    pub fn AsyncRead(self: Client, query: []const u8, name: []const u8, stale: bool) errors.Error!void {
+        abi.setComponentName(self.component_name);
+        abi.setShardName(self.shard_name);
+        abi.setStreamName(name);
+        abi.setData(query);
+        if (stale) {
+            abi.async_read_local();
+        } else {
+            abi.async_read();
+        }
+    }
+
+    pub fn AsyncApply(self: Client, cmd: []const u8, name: []const u8) errors.Error!void {
+        abi.setComponentName(self.component_name);
+        abi.setShardName(self.shard_name);
+        abi.setStreamName(name);
+        abi.setData(cmd);
+        abi.async_apply();
+    }
+
     pub fn StreamOpen(self: Client, name: []const u8) errors.Error!void {
         if (abi.stream_recv == null) {
             return errors.ErrStreamRecvNotRegistered;
@@ -57,7 +77,7 @@ pub const Client = struct {
         abi.setComponentName(self.component_name);
         abi.setShardName(self.shard_name);
         abi.setStreamName(name);
-        abi.streamOpen();
+        abi.stream_open();
         return checkErr();
     }
 
@@ -68,7 +88,7 @@ pub const Client = struct {
         abi.setComponentName(self.component_name);
         abi.setShardName(self.shard_name);
         abi.setStreamName(name);
-        abi.streamOpenLocal();
+        abi.stream_open_local();
         return checkErr();
     }
 
@@ -76,14 +96,14 @@ pub const Client = struct {
         _ = self;
         abi.setStreamName(name);
         abi.setData(data);
-        abi.streamSend();
+        abi.stream_send();
         return checkErr();
     }
 
     pub fn StreamClose(self: Client, name: []const u8) errors.Error!void {
         _ = self;
         abi.setStreamName(name);
-        abi.streamClose();
+        abi.stream_close();
         return checkErr();
     }
 };
@@ -99,8 +119,13 @@ pub fn RegisterStreamRecv(callback: abi.StreamRecvFn) errors.Error!void {
     abi.stream_recv = callback;
 }
 
-// HostError returns the message for the most recent error.Host returned by a
-// Client stream method.
+pub fn RegisterAsyncRecv(callback: abi.AsyncRecvFn) errors.Error!void {
+    if (abi.async_recv != null) {
+        return errors.ErrAsyncRecvAlreadyRegistered;
+    }
+    abi.async_recv = callback;
+}
+
 pub fn HostError() ?[]const u8 {
     return abi.getErr();
 }

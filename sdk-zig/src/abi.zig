@@ -1,4 +1,5 @@
 pub const StreamRecvFn = *const fn (name: []const u8, data: []const u8, val: u64) void;
+pub const AsyncRecvFn = *const fn (name: []const u8, data: []const u8, val: u64, err: ?[]const u8) void;
 
 const component_name_cap = 64;
 const shard_name_cap = 64;
@@ -26,6 +27,7 @@ var err: [err_cap]u8 = .{0} ** err_cap;
 var streamName: [stream_name_cap]u8 = .{0} ** stream_name_cap;
 
 pub var stream_recv: ?StreamRecvFn = null;
+pub var async_recv: ?AsyncRecvFn = null;
 
 export fn __shard_client() u32 {
     meta[0] = @intCast(@intFromPtr(&val));
@@ -49,6 +51,10 @@ export fn __shard_client() u32 {
 
 export fn __shard_client_stream_recv() void {
     stream_recv.?(getStreamName(), getData(), getVal());
+}
+
+export fn __shard_client_async_recv() void {
+    async_recv.?(getStreamName(), getData(), getVal(), getErr());
 }
 
 pub fn setComponentName(name: []const u8) void {
@@ -111,6 +117,9 @@ pub fn getStreamName() []const u8 {
 extern "pantopic/wazero-shard-client" fn __shard_client_read() void;
 extern "pantopic/wazero-shard-client" fn __shard_client_read_local() void;
 extern "pantopic/wazero-shard-client" fn __shard_client_apply() void;
+extern "pantopic/wazero-shard-client" fn __shard_client_async_read() void;
+extern "pantopic/wazero-shard-client" fn __shard_client_async_read_local() void;
+extern "pantopic/wazero-shard-client" fn __shard_client_async_apply() void;
 extern "pantopic/wazero-shard-client" fn __shard_client_stream_open() void;
 extern "pantopic/wazero-shard-client" fn __shard_client_stream_open_local() void;
 extern "pantopic/wazero-shard-client" fn __shard_client_stream_send() void;
@@ -120,26 +129,37 @@ pub fn read() void {
     __shard_client_read();
 }
 
-pub fn readLocal() void {
+pub fn read_local() void {
     __shard_client_read_local();
 }
 
 pub fn apply() void {
     __shard_client_apply();
 }
+pub fn async_read() void {
+    __shard_client_async_read();
+}
 
-pub fn streamOpen() void {
+pub fn async_read_local() void {
+    __shard_client_async_read_local();
+}
+
+pub fn async_apply() void {
+    __shard_client_async_apply();
+}
+
+pub fn stream_open() void {
     __shard_client_stream_open();
 }
 
-pub fn streamOpenLocal() void {
+pub fn stream_open_local() void {
     __shard_client_stream_open_local();
 }
 
-pub fn streamSend() void {
+pub fn stream_send() void {
     __shard_client_stream_send();
 }
 
-pub fn streamClose() void {
+pub fn stream_close() void {
     __shard_client_stream_close();
 }
