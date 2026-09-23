@@ -129,43 +129,43 @@ func setStreamName(name []byte) {
 	streamNameLen = uint32(len(name))
 }
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_read
 func _read()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_read_local
 func _read_local()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_apply
 func _apply()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_async_read
 func _async_read()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_async_read_local
 func _async_read_local()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_async_apply
 func _async_apply()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_stream_open
 func _streamOpen()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_stream_open_local
 func _streamOpenLocal()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_stream_send
 func _streamSend()
 
-//go:wasm-module pantopic/wazero-shard-client
+//go:wasm-module pantopic/ext-shard-client
 //export __shard_client_stream_close
 func _streamClose()
 

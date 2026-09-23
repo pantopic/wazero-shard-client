@@ -17,7 +17,7 @@ import (
 )
 
 // Name is the name of this host module.
-const Name = "pantopic/wazero-shard-client"
+const Name = "pantopic/ext-shard-client"
 
 var (
 	ctxKeyMeta       = Name + `/meta`

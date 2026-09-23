@@ -1,12 +1,12 @@
-# Wazero Shard Client
+# Shard Client
 
 A [wazero](https://pkg.go.dev/github.com/tetratelabs/wazero) host module, ABI and guest SDK providing a pantopic cluster shard client for WASI modules.
 
 ## Host Module
 
-<!-- [![Go Reference](https://godoc.org/github.com/pantopic/wazero-shard-client/host?status.svg)](https://godoc.org/github.com/pantopic/wazero-shard-client/host)
-[![Go Report Card](https://goreportcard.com/badge/github.com/pantopic/wazero-shard-client/host)](https://goreportcard.com/report/github.com/pantopic/wazero-shard-client/host)
-[![Go Coverage](https://github.com/pantopic/wazero-shard-client/wiki/host/coverage.svg)](https://raw.githack.com/wiki/pantopic/wazero-shard-client/host/coverage.html) -->
+<!-- [![Go Reference](https://godoc.org/github.com/pantopic/ext-shard-client/host-wazero?status.svg)](https://godoc.org/github.com/pantopic/ext-shard-client/host-wazero)
+[![Go Report Card](https://goreportcard.com/badge/github.com/pantopic/ext-shard-client/host-wazero)](https://goreportcard.com/report/github.com/pantopic/ext-shard-client/host-wazero)
+[![Go Coverage](https://github.com/pantopic/wazero-shard-client/wiki/host/coverage.svg)](https://raw.githack.com/wiki/pantopic/ext-shard-client/host-wazero/coverage.html) -->
 
 First register the host module with the runtime
 
@@ -15,7 +15,7 @@ import (
     "github.com/tetratelabs/wazero"
     "github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
-    "github.com/pantopic/wazero-shard-client/host"
+    "github.com/pantopic/ext-shard-client/host-wazero"
 )
 
 func main() {
@@ -32,8 +32,8 @@ func main() {
 
 ## Guest SDK (Go)
 
-<!-- [![Go Reference](https://godoc.org/github.com/pantopic/wazero-shard-client/shard-client-go?status.svg)](https://godoc.org/github.com/pantopic/wazero-shard-client/shard-client-go)
-[![Go Report Card](https://goreportcard.com/badge/github.com/pantopic/wazero-shard-client/shard-client-go)](https://goreportcard.com/report/github.com/pantopic/wazero-shard-client/shard-client-go) -->
+<!-- [![Go Reference](https://godoc.org/github.com/pantopic/ext-shard-client/sdk-go?status.svg)](https://godoc.org/github.com/pantopic/ext-shard-client/sdk-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/pantopic/ext-shard-client/sdk-go)](https://goreportcard.com/report/github.com/pantopic/ext-shard-client/sdk-go) -->
 
 Then you can import the guest SDK into your WASI module to interact with pantopic cluster shards from WASM.
 
@@ -43,7 +43,7 @@ package main
 import (
     "unsafe"
 
-    "github.com/pantopic/wazero-shard-client/shard-client-go"
+    "github.com/pantopic/ext-shard-client/sdk-go"
 )
 
 func main() {}

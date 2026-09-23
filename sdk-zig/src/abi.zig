@@ -114,16 +114,16 @@ pub fn getStreamName() []const u8 {
     return streamName[0..streamNameLen];
 }
 
-extern "pantopic/wazero-shard-client" fn __shard_client_read() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_read_local() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_apply() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_async_read() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_async_read_local() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_async_apply() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_stream_open() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_stream_open_local() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_stream_send() void;
-extern "pantopic/wazero-shard-client" fn __shard_client_stream_close() void;
+extern "pantopic/ext-shard-client" fn __shard_client_read() void;
+extern "pantopic/ext-shard-client" fn __shard_client_read_local() void;
+extern "pantopic/ext-shard-client" fn __shard_client_apply() void;
+extern "pantopic/ext-shard-client" fn __shard_client_async_read() void;
+extern "pantopic/ext-shard-client" fn __shard_client_async_read_local() void;
+extern "pantopic/ext-shard-client" fn __shard_client_async_apply() void;
+extern "pantopic/ext-shard-client" fn __shard_client_stream_open() void;
+extern "pantopic/ext-shard-client" fn __shard_client_stream_open_local() void;
+extern "pantopic/ext-shard-client" fn __shard_client_stream_send() void;
+extern "pantopic/ext-shard-client" fn __shard_client_stream_close() void;
 
 pub fn read() void {
     __shard_client_read();
